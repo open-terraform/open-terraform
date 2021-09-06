@@ -1,0 +1,42 @@
+name: community voting reaction
+on:
+  discussion:
+    types: [opened, deleted, answered]
+  discussion_comment:
+    types: [created, deleted]
+  issue_comment:
+    types: [created]
+
+jobs:
+  ack-pr-comment:
+    runs-on: ubuntu-20.04
+    steps:
+    - id: poll-pr-reactions-for-comment
+      # https://docs.github.com/en/actions/reference/events-that-trigger-workflows#issue_comment
+      if: ${{ github.event.issue.pull_request }}
+      # https://docs.github.com/en/rest/reference/reactions#reaction-types
+      # language=sh
+      run: |
+        set -euo pipefail
+        # the number of +1 needed ABOVE any -1 counts found
+        THRESHOLD=5
+        echo "$GITHUB_EVENT_NAME on PR #${{ github.event.issue.number }} \"$GITHUB_EVENT_PATH\" -> $(cat "$GITHUB_EVENT_PATH")" >&2
+        reactions_url="$GITHUB_API_URL"'/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/reactions'
+        get_reactions_count() {
+          curl --fail --silent \
+          -H 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+          -H 'Accept: application/vnd.github.squirrel-girl-preview+json' \
+          "$reactions_url?content=$1" | jq -r '.|length'
+        }
+        plus_ones=$(get_reactions_count "%2B1")
+        minus_ones=$(get_reactions_count "-1")
+        net_ones=$(( plus_ones - minus_ones ))
+        if [[ $net_ones -ge $THRESHOLD ]]; then
+          echo 'The community has spoken!'
+          curl --fail --silent \
+            -X PUT \
+            -H 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' \
+            -H "Accept: application/vnd.github.v3+json" \
+            -d '{"commit_title":"Accepted PR #${{ github.event.issue.number }} by community vote"}' \
+            "$GITHUB_API_URL"'/repos/${{ github.repository }}/pulls/${{ github.event.issue.number }}/merge'
+        fi
